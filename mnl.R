@@ -26,7 +26,7 @@ apollo_initialise()
 apollo_control = list(
   modelDescr      = "Very simple MNL model based on CR mode choice MATSim data",
   indivID         = "ID", 
-  outputDirectory = "output",
+  outputDirectory = "../../shared-svn/projects/matsim-berlin/data/SrV/2018/halil/output/",
   modelName = "simpleMNL",
   weights = "weight"
 )
@@ -39,9 +39,22 @@ apollo_control = list(
 ### if data is to be loaded from a file (e.g. called data.csv), 
 ### the code would be: database = read.csv("data.csv",header=TRUE)
 
-database <- read_csv("/Users/gregorr/Documents/work/respos/shared-svn/projects/matsim-berlin/data/SrV/2018/converted/trip-choices.csv", comment = "#")  %>%
+
+##we need to split the data set for the dnn model
+testData <- read_csv("../../shared-svn/projects/matsim-berlin/data/SrV/2018/halil/Train-Test Data/test_data.csv",  comment = "#")
+fullData <- read_csv("../../shared-svn/projects/matsim-berlin/data/SrV/2018/halil/trip-choices.csv", comment = "#")
+
+testData <- testData %>%
+  left_join(
+    fullData %>% select(person, trip_n, util_money),
+    by = c("person", "trip_n")
+  )
+
+
+database <- testData  %>%
       rename(ID = person) %>%
       rename(util_money_inp = util_money)
+
 
 distances <- database %>% group_by(ID) %>%
         summarise(total_dist=sum(beelineDist))
@@ -68,7 +81,7 @@ apollo_beta=c(asc_car   = 0,
               asc_pt   = 0,
               asc_walk  = 0,
               asc_ride = 0,
-              b_tt = 6.88,
+              b_tt = 0,
 #              b_tt_car  = 0,
 #              b_tt_pt  = 0,
 #              b_tt_walk = 0,
@@ -76,7 +89,8 @@ apollo_beta=c(asc_car   = 0,
 #              b_tt_ride = 0,
               util_money = 1,
               fixed_costs_perception=1,
-              exp_income = 1
+              exp_income = 1,
+              b_line_switches =0
             )
 
 ### Vector with names (in quotes) of parameters to be kept fixed at their starting value in apollo_beta, use apollo_beta_fixed = c() if none
@@ -105,16 +119,16 @@ apollo_probabilities=function(apollo_beta, apollo_inputs, functionality="estimat
   P = list()
   
   # price * util_money * (income/mean(income))^b_elasticitypriceincome
-  mean_income <- 1942.362
+  mean_income <- 1942
   
   ### List of utilities: these must use the same names as in mnl_settings, order is irrelevant
   V = list()
-  V[["car"]]  = asc_car - b_tt  * car_hours + (car_fixed_costs * fixed_costs_perception + car_dist_costs) * util_money * (mean_income / income) ** exp_income
-  V[["pt"]]  = asc_pt - b_tt * pt_hours + pt_fixed_costs * fixed_costs_perception * util_money * (mean_income / income) ** exp_income - pt_switches
-  V[["bike"]]  = asc_bike  - b_tt * bike_hours 
-  V[["walk"]] = asc_walk - b_tt * walk_hours
+  V[["car"]]  = asc_car + b_tt  * car_hours + (car_fixed_costs * fixed_costs_perception + car_dist_costs) * util_money * (mean_income / income) ** exp_income
+  V[["pt"]]  = asc_pt + b_tt * pt_hours + pt_fixed_costs * util_money * (mean_income / income) ** exp_income - b_line_switches * pt_switches
+  V[["bike"]]  = asc_bike  + b_tt * bike_hours 
+  V[["walk"]] = asc_walk + b_tt * walk_hours
   # Ride has double the time costs because of driver + passenger
-  V[["ride"]] = asc_ride - b_tt * ride_hours * 2 + ride_dist_costs * util_money * (mean_income / income) ** exp_income
+  V[["ride"]] = asc_ride + b_tt * ride_hours * 2 + ride_dist_costs * util_money * (mean_income / income) ** exp_income
   
   ### Define settings for MNL model component
   mnl_settings = list(
@@ -157,7 +171,6 @@ estimate_settings <- list(estimationRoutine="BFGS", constraints=c(
 ))
 
 model = apollo_estimate(apollo_beta, apollo_fixed, apollo_probabilities, apollo_inputs, estimate_settings)
-
 apollo_prediction(model, apollo_probabilities, apollo_inputs )
 
 P_predicted = apollo_probabilities(model$estimate, apollo_inputs, functionality = "prediction")
@@ -167,7 +180,7 @@ P_predicted = apollo_probabilities(model$estimate, apollo_inputs, functionality 
 df <- bind_rows(P_predicted) %>%
   add_column(ID = database$ID, trip_n = database$trip_n + 1, choice = database$choice, .before = 0)
 
-write_csv(df, "../mnl_output.csv")
+write_csv(df, "../../shared-svn/projects/matsim-berlin/data/SrV/2018/halil/output/mnl_output.csv")
 
 # Step 1: Extract the predicted probabilities for each alternative
 prob_walk = P_predicted$model$walk
