@@ -27,7 +27,7 @@ apollo_control = list(
   modelDescr      = "Very simple MNL model based on CR mode choice MATSim data",
   indivID         = "ID", 
   outputDirectory = "../../shared-svn/projects/matsim-berlin/data/SrV/2018/halil/output/",
-  modelName = "simpleMNL",
+  modelName = "withLineSwitchesNoFixedCostPerception",
   weights = "weight"
 )
 
@@ -41,7 +41,7 @@ apollo_control = list(
 
 
 ##we need to split the data set for the dnn model
-testData <- read_csv("../../shared-svn/projects/matsim-berlin/data/SrV/2018/halil/Train-Test Data/test_data.csv",  comment = "#")
+testData <- read_csv("../../shared-svn/projects/matsim-berlin/data/SrV/2018/halil/Train-Test Data/train_data.csv",  comment = "#")
 fullData <- read_csv("../../shared-svn/projects/matsim-berlin/data/SrV/2018/halil/trip-choices.csv", comment = "#")
 
 testData <- testData %>%
@@ -63,11 +63,14 @@ distances <- database %>% group_by(ID) %>%
 
 database <- left_join(database, distances, by = "ID") %>%
   mutate(distanceWeight = beelineDist / total_dist) %>%
-  mutate(distanceWeight = replace_na(distanceWeight, 1)) %>%
+  ##mutate(distanceWeight = replace_na(distanceWeight, 1)) %>%
   mutate(car_dist_costs=car_km * -0.149, ride_dist_costs=ride_km * -0.149) %>%
   mutate(car_fixed_costs=distanceWeight * -14.30, pt_fixed_costs=distanceWeight * -3) %>%
   # Disable the panel effect 
   mutate(ID = row_number())
+
+##check if there are any na in the database
+sum(is.na(database))
 
 ### for data dictionary, use ?apollo_modeChoiceData
 
@@ -88,7 +91,7 @@ apollo_beta=c(asc_car   = 0,
 #              b_tt_bike = 0,
 #              b_tt_ride = 0,
               util_money = 1,
-              fixed_costs_perception=1,
+#              fixed_costs_perception=1,
               exp_income = 1,
               b_line_switches =0
             )
@@ -123,8 +126,8 @@ apollo_probabilities=function(apollo_beta, apollo_inputs, functionality="estimat
   
   ### List of utilities: these must use the same names as in mnl_settings, order is irrelevant
   V = list()
-  V[["car"]]  = asc_car + b_tt  * car_hours + (car_fixed_costs * fixed_costs_perception + car_dist_costs) * util_money * (mean_income / income) ** exp_income
-  V[["pt"]]  = asc_pt + b_tt * pt_hours + pt_fixed_costs * util_money * (mean_income / income) ** exp_income - b_line_switches * pt_switches
+  V[["car"]]  = asc_car + b_tt  * car_hours + (car_fixed_costs  + car_dist_costs) * util_money * (mean_income / income) ** exp_income
+  V[["pt"]]  = asc_pt + b_tt * pt_hours + pt_fixed_costs * util_money * (mean_income / income) ** exp_income + b_line_switches * pt_switches
   V[["bike"]]  = asc_bike  + b_tt * bike_hours 
   V[["walk"]] = asc_walk + b_tt * walk_hours
   # Ride has double the time costs because of driver + passenger
@@ -163,10 +166,10 @@ apollo_probabilities=function(apollo_beta, apollo_inputs, functionality="estimat
 # ################################################################# #
 
 estimate_settings <- list(estimationRoutine="BFGS", constraints=c(
-  'util_money > 0.3 - 1e-10', 
-  'util_money < 1.5 + 1e-10',
-  'fixed_costs_perception > 0 - 1e-10',
-  'fixed_costs_perception < 1 + 1e-10'
+#  'util_money > 0.3 - 1e-10', 
+#  'util_money < 1.5 + 1e-10'
+#  'fixed_costs_perception > 0 - 1e-10',
+#  'fixed_costs_perception < 1 + 1e-10'
 #  'b_tt < 0 + 1e-10'
 ))
 
@@ -180,7 +183,7 @@ P_predicted = apollo_probabilities(model$estimate, apollo_inputs, functionality 
 df <- bind_rows(P_predicted) %>%
   add_column(ID = database$ID, trip_n = database$trip_n + 1, choice = database$choice, .before = 0)
 
-write_csv(df, "../../shared-svn/projects/matsim-berlin/data/SrV/2018/halil/output/mnl_output.csv")
+write_csv(df, "../../shared-svn/projects/matsim-berlin/data/SrV/2018/halil/output/mnl_output_mitLineSwitches.csv")
 
 # Step 1: Extract the predicted probabilities for each alternative
 prob_walk = P_predicted$model$walk
